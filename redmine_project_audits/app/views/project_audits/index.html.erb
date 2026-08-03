@@ -1,0 +1,125 @@
+<h2>Log de Auditoría de Proyectos</h2>
+
+<!-- Formulario de Filtro por Fechas -->
+<fieldset class="collapsible" style="margin-bottom: 15px;">
+  <legend onclick="toggleFieldset(this);" class="icon icon-expanded">Filtros</legend>
+  <div>
+    <%= form_tag(project_audits_path, method: :get) do %>
+      <label for="from_date">Desde:</label>
+      <%= date_field_tag 'from_date', @from_date %>
+
+      <label for="to_date" style="margin-left: 10px;">Hasta:</label>
+      <%= date_field_tag 'to_date', @to_date %>
+
+      <%= submit_tag 'Aplicar', class: 'button-small' %>
+      <%= link_to 'Limpiar', project_audits_path, class: 'button-small' %>
+    <% end %>
+  </div>
+</fieldset>
+
+<!-- Tabla con Detalle de Cambios -->
+<div class="autoscroll">
+  <table class="list">
+    <thead>
+      <tr>
+        <th>Fecha y Hora</th>
+        <th>Usuario (Administrador)</th>
+        <th>Nombre del Proyecto</th>
+        <th>Acción Ejecutada</th>
+        <th>Detalle de Cambios</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% if @audits.any? %>
+        <% @audits.each do |audit| %>
+          <tr class="<%= cycle('odd', 'even') %>">
+            <td align="center"><%= audit.created_at.in_time_zone('America/Asuncion').strftime('%d/%m/%Y %H:%M:%S') %></td>
+            <td align="center"><%= audit.user.present? ? audit.user.name : "Usuario ID: #{audit.user_id}" %></td>
+            <td align="center"><strong><%= audit.project_name %></strong></td>
+            <td align="center">
+              <% if audit.action_type == 'crear' %>
+                <span style="color: green; font-weight: bold;">[+] Creado</span>
+              <% elsif audit.action_type == 'editar' %>
+                <span style="color: #d97706; font-weight: bold;">[*] Editado</span>
+              <% elsif audit.action_type == 'borrar' %>
+                <span style="color: red; font-weight: bold;">[-] Borrado</span>
+              <% else %>
+                <%= audit.action_type %>
+              <% end %>
+            </td>
+            <td>
+              <% if audit.details.present? %>
+                <% begin %>
+                  <% details_hash = JSON.parse(audit.details) %>
+                  <% if details_hash.is_a?(Hash) %>
+                    <ul style="margin: 0; padding-left: 15px; text-align: left; font-size: 0.9em;">
+                      <% details_hash.each do |field, values| %>
+                        <% 
+                          # Ocultar campos técnicos basura de los registros antiguos
+                          next if %w[lft rgt updated_on updated_at created_on created_at id].include?(field)
+
+                          # Detectar si es un Campo Personalizado y traducirlo
+                          if field.start_with?('CF: ')
+                            field_name = field.gsub('CF: ', '') + ' (Personalizado)'
+                          else
+                            field_name = case field
+                                         when 'is_public' then 'Público'
+                                         when 'parent_id' then 'Proyecto Padre'
+                                         when 'name' then 'Nombre'
+                                         when 'description' then 'Descripción'
+                                         when 'identifier' then 'Identificador'
+                                         when 'status' then 'Estado'
+                                         when 'homepage' then 'Página web'
+                                         when 'inherit_members' then 'Heredar miembros'
+                                         else field.humanize
+                                         end
+                          end
+
+                          # Función para formatear booleanos, vacíos, Proyecto Padre y fechas
+                          format_val = ->(val, current_field) {
+                            return '<em style="color: #9ca3af;">(vacío)</em>'.html_safe if val.nil? || val.to_s.strip.empty?
+                            return 'Sí' if val == true || val == 'true'
+                            return 'No' if val == false || val == 'false'
+                            
+                            # Si es el ID de Proyecto Padre, busca el nombre del proyecto
+                            if current_field == 'parent_id'
+                              parent_project = Project.find_by(id: val)
+                              return parent_project ? ERB::Util.html_escape(parent_project.name) : "ID: #{val}"
+                            end
+
+                            # Formato de fechas
+                            if val.to_s.match?(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
+                              Time.zone.parse(val.to_s).in_time_zone('America/Asuncion').strftime('%d/%m/%Y %H:%M:%S')
+                            else
+                              ERB::Util.html_escape(val.to_s)
+                            end
+                          }
+                        %>
+                        <li>
+                          <strong><%= field_name %>:</strong>
+                          <span style="color: #b91c1c; text-decoration: line-through;"><%= format_val.call(values[0], field) %></span>
+                          &rarr;
+                          <span style="color: #15803d; font-weight: bold;"><%= format_val.call(values[1], field) %></span>
+                        </li>
+                      <% end %>
+                    </ul>
+                  <% else %>
+                    <%= audit.details %>
+                  <% end %>
+                <% rescue JSON::ParserError %>
+                  <%= audit.details %>
+                <% end %>
+              <% else %>
+                <span style="color: #9ca3af; font-style: italic;">Sin detalles adicionales</span>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+      <% else %>
+        <tr>
+          <td colspan="5" align="center"><em>No se encontraron registros de auditoría para el rango seleccionado.</em></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</div>
